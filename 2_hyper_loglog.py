@@ -1,56 +1,57 @@
+import json
 import time
+from datasketch import HyperLogLog
 from collections import Counter
-from hyperloglog import HyperLogLog
-import re
 
 
-# Функція для завантаження даних з лог-файлу
-def load_data(file_path):
-    ip_pattern = re.compile(r"\\b(?:\\d{1,3}\\.){3}\\d{1,3}(?::\\d+)?\\b")
-    valid_ips = []
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
-        for line in file:
-            match = ip_pattern.search(line)
-            if match:
-                valid_ips.append(match.group())
-    print(f"Завантажено рядків: {len(valid_ips)}")
-    if valid_ips:
-        print(f"Приклад IP: {valid_ips[:5]}")
-    return valid_ips
+# Реалізація точного підрахунку унікальних IP
+def exact_unique_ips(file_path):
+    unique_ips = set()
+    processed_lines = 0
+    skipped_lines = 0
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                log_entry = json.loads(line)
+                unique_ips.add(log_entry["remote_addr"])
+                processed_lines += 1
+            except (json.JSONDecodeError, KeyError):
+                skipped_lines += 1
+    print(f"Оброблено рядків: {processed_lines}, Пропущено рядків: {skipped_lines}")
+    return len(unique_ips)
 
 
-# Функція для точного підрахунку унікальних IP-адрес
-def count_unique_ips_exact(data):
-    return len(set(data))
-
-
-# Функція для підрахунку унікальних IP-адрес за допомогою HyperLogLog
-def count_unique_ips_hll(data):
-    hll = HyperLogLog(0.01)
-    for ip in data:
-        hll.add(ip)
-    return len(hll)
-
-
-# Функція для порівняння продуктивності
-def compare_methods(file_path):
-    data = load_data(file_path)
-
-    start_time_exact = time.time()
-    exact_count = count_unique_ips_exact(data)
-    time_exact = time.time() - start_time_exact
-
-    # HyperLogLog підрахунок
-    start_time_hll = time.time()
-    hll_count = count_unique_ips_hll(data)
-    time_hll = time.time() - start_time_hll
-
-    print("Результати порівняння:")
-    print(f"{'Метод':<25}{'Унікальні елементи':<20}{'Час виконання (сек.)':<20}")
-    print(f"{'Точний підрахунок':<25}{exact_count:<20}{time_exact:<20.6f}")
-    print(f"{'HyperLogLog':<25}{hll_count:<20}{time_hll:<20.6f}")
+# Реалізація наближеного підрахунку за допомогою HyperLogLog
+def hyperloglog_unique_ips(file_path, precision=14):
+    hll = HyperLogLog(precision)
+    processed_lines = 0
+    skipped_lines = 0
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                log_entry = json.loads(line)
+                hll.update(log_entry["remote_addr"].encode("utf-8"))
+                processed_lines += 1
+            except (json.JSONDecodeError, KeyError):
+                skipped_lines += 1
+    print(f"Оброблено рядків: {processed_lines}, Пропущено рядків: {skipped_lines}")
+    return hll.count()
 
 
 if __name__ == "__main__":
-    log_file_path = ".\lms-stage-access.log"
-    compare_methods(log_file_path)
+    log_file = "lms-stage-access.log"
+
+    print("Точний підрахунок...")
+    start_time = time.time()
+    exact_count = exact_unique_ips(log_file)
+    exact_time = time.time() - start_time
+
+    print("Підрахунок за допомогою HyperLogLog...")
+    start_time = time.time()
+    approx_count = hyperloglog_unique_ips(log_file)
+    approx_time = time.time() - start_time
+
+    print("\nРезультати порівняння:")
+    print(f"{'Метод':<25}{'Унікальні елементи':<20}{'Час виконання (сек.)':<20}")
+    print(f"{'Точний підрахунок':<25}{exact_count:<20}{exact_time:<20.5f}")
+    print(f"{'HyperLogLog':<25}{approx_count:<20}{approx_time:<20.5f}")
